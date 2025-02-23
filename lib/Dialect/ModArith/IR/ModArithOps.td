@@ -84,7 +84,7 @@ def ModArith_ModSwitchOp : ModArith_Op<"mod_switch", [Pure, SameOperandsAndResul
 }
 
 def ModArith_ConstantOp : Op<ModArith_Dialect, "constant",
-    [Pure, InferTypeOpAdaptor]> {
+    [Pure, InferTypeOpAdaptor, ConstantLike]> {
   let summary = "Define a constant value via an attribute.";
   let description = [{
     Example:
@@ -96,6 +96,7 @@ def ModArith_ConstantOp : Op<ModArith_Dialect, "constant",
   let arguments = (ins ModArith_ModArithAttr:$value);
   let results = (outs ModArith_ModArithType:$output);
   let hasCustomAssemblyFormat = 1;
+  let hasFolder = 1;
 
   let builders = [
     OpBuilder<(ins "::mlir::heir::mod_arith::ModArithType":$ty, "int64_t":$value), [{
@@ -146,6 +147,8 @@ def ModArith_AddOp : ModArith_BinaryOp<"add", [Commutative]> {
     Unless otherwise specified, the operation assumes both inputs are canonical
     representatives and guarantees the output being canonical representative.
   }];
+  //let hasCanonicalizer = 1;
+  let hasFolder = 1;
 }
 
 def ModArith_SubOp : ModArith_BinaryOp<"sub"> {
@@ -156,6 +159,7 @@ def ModArith_SubOp : ModArith_BinaryOp<"sub"> {
     Unless otherwise specified, the operation assumes both inputs are canonical
     representatives and guarantees the output being canonical representative.
   }];
+  let hasFolder = 1;
 }
 
 def ModArith_MulOp : ModArith_BinaryOp<"mul", [Commutative]> {
