@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "llvm/include/llvm/ADT/TypeSwitch.h"            // from @llvm-project
+#include "llvm/include/llvm/Support/Debug.h"          // from @llvm-project
 #include "mlir/include/mlir/IR/BuiltinAttributes.h"      // from @llvm-project
 #include "mlir/include/mlir/IR/BuiltinTypes.h"           // from @llvm-project
 #include "mlir/include/mlir/IR/DialectImplementation.h"  // from @llvm-project
@@ -36,6 +37,8 @@
 
 #define GET_OP_CLASSES
 #include "lib/Dialect/ModArith/IR/ModArithOps.cpp.inc"
+
+#define DEBUG_TYPE "mod-arith"
 
 namespace mlir {
 namespace heir {
@@ -204,89 +207,121 @@ LogicalResult ConstantOp::inferReturnTypes(
 }
 
 OpFoldResult ConstantOp::fold(FoldAdaptor adaptor) {
-  return getValue();
+  // constant(c0) -> c0 mod q
+  auto constant = dyn_cast_if_present<ModArithAttr>(adaptor.getValue());
+  if (!constant)
+    return {};
+  auto modType = dyn_cast_if_present<ModArithType>(getType());
+  if (!modType)
+    return {};
+
+  // Retrieve the modulus value
+  int64_t modulus = modType.getModulus().getValue().getSExtValue();
+
+  // Extract the actual integer value
+  auto value = constant.getValue().getInt();
+
+  // Fold the constant value
+  int64_t foldedVal = ((value % modulus) + modulus) % modulus;
+
+  LLVM_DEBUG({
+    llvm::dbgs() << "\n";
+    llvm::dbgs() << "========================================\n";
+    llvm::dbgs() << "  Folding Operation: Constant\n";
+    llvm::dbgs() << "----------------------------------------\n";
+    llvm::dbgs() << "  Value   : " << value << "\n";
+    llvm::dbgs() << "  Modulus : " << modulus << "\n";
+    llvm::dbgs() << "  Folded  : " << foldedVal << "\n";
+    llvm::dbgs() << "========================================\n";
+  });
+  
+  // Create the resulting ModArithAttr
+  auto elementType = modType.getModulus().getType();
+  auto foldedIntAttr = IntegerAttr::get(elementType, foldedVal);
+  auto ctx = getContext();
+  return ModArithAttr::get(ctx, modType, foldedIntAttr);
+}
+
+/// Helper function to handle common folding logic for binary arithmetic operations.
+/// - `opName` is used for debug output.
+/// - `foldBinFn` defines how the actual binary operation (+, -, *) should be performed.
+template <typename FoldAdaptor, typename FoldBinFn>
+static OpFoldResult foldBinModOp(Operation *op,
+                              FoldAdaptor adaptor,
+                              FoldBinFn &&foldBinFn,
+                              llvm::StringRef opName) {
+  // Check if lhs and rhs are ModArithAttr
+  auto lhs = dyn_cast_if_present<ModArithAttr>(adaptor.getLhs());
+  auto rhs = dyn_cast_if_present<ModArithAttr>(adaptor.getRhs());
+  if (!lhs || !rhs)
+    return {};
+
+  // Ensure the result type is ModArithType
+  auto modType = dyn_cast<ModArithType>(op->getResultTypes().front());
+  if (!modType)
+    return {};
+
+  // Retrieve the modulus value
+  int64_t modulus = modType.getModulus().getValue().getSExtValue();
+
+  // Extract the actual integer values
+  int64_t lhsVal = lhs.getValue().getInt();
+  int64_t rhsVal = rhs.getValue().getInt();
+
+  // Perform the operation using the provided foldBinFn
+  int64_t foldedVal = foldBinFn(lhsVal, rhsVal, modulus);
+
+  LLVM_DEBUG({
+    llvm::dbgs() << "\n";
+    llvm::dbgs() << "========================================\n";
+    llvm::dbgs() << "  Folding Operation: " << opName << "\n";
+    llvm::dbgs() << "----------------------------------------\n";
+    llvm::dbgs() << "  LHS     : " << lhsVal << "\n";
+    llvm::dbgs() << "  RHS     : " << rhsVal << "\n";
+    llvm::dbgs() << "  Modulus : " << modulus << "\n";
+    llvm::dbgs() << "  Folded  : " << foldedVal << "\n";
+    llvm::dbgs() << "========================================\n";
+  });
+
+  // Create the resulting ModArithAttr
+  auto elementType = modType.getModulus().getType();
+  auto foldedIntAttr = IntegerAttr::get(elementType, foldedVal);
+  auto ctx = op->getContext();
+  return ModArithAttr::get(ctx, modType, foldedIntAttr);
 }
 
 OpFoldResult AddOp::fold(FoldAdaptor adaptor) {
-  if (auto lhsAttr = dyn_cast<ModArithAttr>(adaptor.getLhs())) {
-    auto inner = lhsAttr.getValue();
-    if (inner.getValue().isZero()) {
-      // add(0, x) -> x
-      return getRhs();
-    }
-  }
-
-  if (auto rhsAttr = dyn_cast<ModArithAttr>(adaptor.getRhs())) {
-    auto inner = rhsAttr.getValue();
-    if (inner.getValue().isZero()) {
-      // add(x, 0) -> x
-      return getLhs();
-    }
-  }
-
-  // add(c0, c1) -> c0 + c1 mod q
-  auto lhs = dyn_cast<ModArithAttr>(adaptor.getLhs());
-  auto rhs = dyn_cast<ModArithAttr>(adaptor.getRhs());
-  if (lhs && rhs) {
-    auto modType = dyn_cast<ModArithType>(getType());
-    if (!modType)
-      return {};
-
-    int64_t modulus = modType.getModulus().getValue().getSExtValue();
-    auto lhsInner = lhs.getValue().getInt();
-    auto rhsInner = rhs.getValue().getInt();
-
-    int64_t foldedVal = (lhsInner + rhsInner) % modulus;
-    auto elementType = modType.getModulus().getType();
-
-    auto foldedIntAttr = IntegerAttr::get(elementType, foldedVal);
-    auto foldedModArithAttr = ModArithAttr::get(getContext(), modType, foldedIntAttr);
-    return foldedModArithAttr;
-  }
-
-  return {};
+  // add(c0, c1) -> (c0 + c1) mod q
+  return foldBinModOp(getOperation(), adaptor,
+                   [](int64_t lhs, int64_t rhs, int64_t modulus) {
+                     int64_t sum = lhs + rhs;
+                     // Subtract modulus if the result exceeds it
+                     return (sum >= modulus) ? (sum - modulus) : sum;
+                   },
+                   "Add");
 }
 
 OpFoldResult SubOp::fold(FoldAdaptor adaptor) {
-  if (auto lhsAttr = dyn_cast<ModArithAttr>(adaptor.getLhs())) {
-    auto inner = lhsAttr.getValue();
-    if (inner.getValue().isZero()) {
-      // sub(0, x) -> -x
-      // TODO : How to represent -x?
-      return  {};
-    }
-  }
-
-  if (auto rhsAttr = dyn_cast<ModArithAttr>(adaptor.getRhs())) {
-    auto inner = rhsAttr.getValue();
-    if (inner.getValue().isZero()) {
-      // sub(x, 0) -> x
-      return getLhs();
-    }
-  }
-
-  // sub(c0, c1) -> c0 - c1 mod q
-  auto lhs = dyn_cast<ModArithAttr>(adaptor.getLhs());
-  auto rhs = dyn_cast<ModArithAttr>(adaptor.getRhs());
-  if (lhs && rhs) {
-    auto modType = dyn_cast<ModArithType>(getType());
-    if (!modType)
-      return {};
-
-    int64_t modulus = modType.getModulus().getValue().getSExtValue();
-    auto lhsInner = lhs.getValue().getInt();
-    auto rhsInner = rhs.getValue().getInt();
-
-    int64_t foldedVal = (lhsInner - rhsInner) % modulus;
-    auto elementType = modType.getModulus().getType();
-
-    auto foldedIntAttr = IntegerAttr::get(elementType, foldedVal);
-    auto foldedModArithAttr = ModArithAttr::get(getContext(), modType, foldedIntAttr);
-    return foldedModArithAttr;
-  }
-
-  return {};
+  // sub(c0, c1) -> (c0 - c1) mod q
+  return foldBinModOp(getOperation(), adaptor,
+                   [](int64_t lhs, int64_t rhs, int64_t modulus) {
+                     int64_t diff = lhs - rhs;
+                     // Add modulus if the result is negative
+                     return (diff < 0) ? (diff + modulus) : diff;
+                   },
+                   "Sub");
 }
+
+OpFoldResult MulOp::fold(FoldAdaptor adaptor) {
+  // mul(c0, c1) -> (c0 * c1) mod q
+  return foldBinModOp(getOperation(), adaptor,
+                   [](int64_t lhs, int64_t rhs, int64_t modulus) {
+                     // Perform modular multiplication
+                     return (lhs * rhs) % modulus;
+                   },
+                   "Mul");
+}
+
 
 Operation *ModArithDialect::materializeConstant(
   OpBuilder &builder, 
@@ -311,16 +346,25 @@ return nullptr;
 // TableGen'd canonicalization patterns
 //===----------------------------------------------------------------------===//
 
-//namespace {
-//#include "lib/Dialect/ModArith/IR/ModArithCanonicalization.cpp.inc"
-//}  // namespace
-//
-//void AddOp::getCanonicalizationPatterns(RewritePatternSet &results,
-//                                        MLIRContext *context) {
-//  results.add<AddZero, SubZero, AddAddConstant>(context);
-//}
-//
-//
+namespace {
+#include "lib/Dialect/ModArith/IR/ModArithCanonicalization.cpp.inc"
+}  // namespace
+
+void AddOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                        MLIRContext *context) {
+  results.add<AddZero, AddAddConstant, AddSubConstantRHS, AddSubConstantLHS, AddMulNegativeOneRhs, AddMulNegativeOneLhs>(context);
+}
+
+void SubOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                        MLIRContext *context) {
+  results.add<SubZero, SubRHSAddConstant, SubLHSAddConstant, SubRHSSubConstantRHS, SubRHSSubConstantLHS, SubLHSSubConstantRHS, SubLHSSubConstantLHS, SubSubLHSRHSLHS>(context);
+}
+
+void MulOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                        MLIRContext *context) {
+  results.add<MulZero, MulOne, MulMulConstant>(context);
+}
+
 }  // namespace mod_arith
 }  // namespace heir
 }  // namespace mlir

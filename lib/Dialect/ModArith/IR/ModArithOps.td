@@ -147,7 +147,7 @@ def ModArith_AddOp : ModArith_BinaryOp<"add", [Commutative]> {
     Unless otherwise specified, the operation assumes both inputs are canonical
     representatives and guarantees the output being canonical representative.
   }];
-  //let hasCanonicalizer = 1;
+  let hasCanonicalizer = 1;
   let hasFolder = 1;
 }
 
@@ -159,6 +159,7 @@ def ModArith_SubOp : ModArith_BinaryOp<"sub"> {
     Unless otherwise specified, the operation assumes both inputs are canonical
     representatives and guarantees the output being canonical representative.
   }];
+  let hasCanonicalizer = 1;
   let hasFolder = 1;
 }
 
@@ -170,6 +171,8 @@ def ModArith_MulOp : ModArith_BinaryOp<"mul", [Commutative]> {
     Unless otherwise specified, the operation assumes both inputs are canonical
     representatives and guarantees the output being canonical representative.
   }];
+  let hasCanonicalizer = 1;
+  let hasFolder = 1;
 }
 
 def ModArith_MacOp : ModArith_Op<"mac", [SameOperandsAndResultType, Pure, ElementwiseMappable]> {
