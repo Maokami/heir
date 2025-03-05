@@ -175,9 +175,7 @@ OpFoldResult ConstantOp::fold(FoldAdaptor adaptor) {
   unsigned modBitWidth = modulus.getBitWidth();
 
   // Adjust cst's bit width to match modulus if necessary
-  if (cst.getBitWidth() != modBitWidth) {
-    cst = cst.zext(modBitWidth);
-  }
+  cst = cst.zextOrTrunc(modBitWidth);
 
   // Fold the constant value
   APInt foldedVal = cst.urem(modulus);
@@ -224,12 +222,8 @@ static OpFoldResult foldBinModOp(Operation *op, FoldAdaptor adaptor,
   APInt rhsVal = rhs.getValue();
 
   // Adjust lhsVal and rhsVal bit widths to match modulus if necessary
-  if (lhsVal.getBitWidth() != modBitWidth) {
-    lhsVal = lhsVal.zext(modBitWidth);
-  }
-  if (rhsVal.getBitWidth() != modBitWidth) {
-    rhsVal = rhsVal.zext(modBitWidth);
-  }
+  lhsVal = lhsVal.zextOrTrunc(modBitWidth);
+  rhsVal = rhsVal.zextOrTrunc(modBitWidth);
 
   // Perform the operation using the provided foldBinFn
   APInt foldedVal = foldBinFn(lhsVal, rhsVal, modulus);

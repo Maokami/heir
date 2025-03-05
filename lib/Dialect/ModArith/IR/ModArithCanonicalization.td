@@ -10,7 +10,7 @@ def Equal : Constraint<CPred<"$0 == $1">>;
 def IsZero : Constraint<CPred<"$0.getValue().isZero()">>;
 def IsOne : Constraint<CPred<"$0.getValue() == APInt($0.getValue().getBitWidth(), 1, true)">>;
 
-def IsMinusOne : Constraint<CPred<"$1.getValue().zext(dyn_cast<ModArithType>($0.getType()).getModulus().getValue().getBitWidth()) == dyn_cast<ModArithType>($0.getType()).getModulus().getValue() - APInt(dyn_cast<ModArithType>($0.getType()).getModulus().getValue().getBitWidth(), 1)">>;
+def IsMinusOne : Constraint<CPred<"$1.getValue().zextOrTrunc(dyn_cast<ModArithType>($0.getType()).getModulus().getValue().getBitWidth()) == dyn_cast<ModArithType>($0.getType()).getModulus().getValue() - APInt(dyn_cast<ModArithType>($0.getType()).getModulus().getValue().getBitWidth(), 1)">>;
 
 def CreateZeroConstant : NativeCodeCall<
    "$_builder.create<ConstantOp>($0.getLoc(), dyn_cast<ModArithType>($0.getType()), IntegerAttr::get(dyn_cast<ModArithType>($0.getType()).getModulus().getType(), 0));">
